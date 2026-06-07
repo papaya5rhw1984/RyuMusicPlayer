@@ -1,6 +1,24 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M66,30 L66,62 A10,10 0 1 1 60,53 L60,40 L48,43 L48,68 A10,10 0 1 1 42,59 L42,36 Z"/>
+    <!-- 바이닐 디스크 -->
+    <path android:fillColor="#15110E"
+        android:pathData="M6,54 a48,48 0 1,0 96,0 a48,48 0 1,0 -96,0" />
+    <!-- 홈(groove) -->
+    <path android:strokeColor="#2E2620" android:strokeWidth="1.5"
+        android:pathData="M14,54 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0" />
+    <path android:strokeColor="#2E2620" android:strokeWidth="1.5"
+        android:pathData="M22,54 a32,32 0 1,0 64,0 a32,32 0 1,0 -64,0" />
+    <!-- 라벨 -->
+    <path android:fillColor="#F0B35B"
+        android:pathData="M32,54 a22,22 0 1,0 44,0 a22,22 0 1,0 -44,0" />
+    <!-- 음표 -->
+    <group android:translateX="34.8" android:translateY="34.8"
+        android:scaleX="1.6" android:scaleY="1.6">
+        <path android:fillColor="#1A1512"
+            android:pathData="M12,3 v10.55 A4,4 0 1 0 14,17 V7 h4 V3 h-6 z" />
+    </group>
+    <!-- 중심 구멍 -->
+    <path android:fillColor="#1A1512"
+        android:pathData="M51,54 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
 </vector>
