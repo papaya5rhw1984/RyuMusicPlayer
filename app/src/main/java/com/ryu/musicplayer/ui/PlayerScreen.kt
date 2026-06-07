@@ -7,18 +7,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -32,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,10 +53,8 @@ fun PlayerScreen(viewModel: PlayerViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
-    // null = 폴더/목록 리스트(브라우즈), 값 있으면 그 컬렉션의 곡 목록(상세)
     var detailChip by remember { mutableStateOf<String?>(null) }
 
-    // 뒤로가기: 지금재생 → 메인, 상세 → 브라우즈, 그 외엔 앱 종료(기본)
     BackHandler(enabled = pagerState.currentPage != 0 || detailChip != null) {
         when {
             pagerState.currentPage != 0 -> scope.launch { pagerState.animateScrollToPage(0) }
@@ -181,7 +176,6 @@ private fun VinylDisc(artworkUri: String?, isPlaying: Boolean, onClick: () -> Un
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        // LP판 홈(groove)
         Canvas(Modifier.fillMaxSize().rotate(rotation.value)) {
             val r = size.minDimension / 2f
             drawCircle(Color(0xFF1C1714), radius = r)
@@ -195,13 +189,11 @@ private fun VinylDisc(artworkUri: String?, isPlaying: Boolean, onClick: () -> Un
                 rr -= 6f
             }
         }
-        // 가운데 라벨 (앨범아트 또는 음표)
         Box(
             Modifier.size(118.dp).clip(CircleShape)
                 .background(Brush.linearGradient(listOf(Vinyl.Accent, Vinyl.Accent2))),
             contentAlignment = Alignment.Center
         ) {
-            // 폴백 음표(아래) 위에 앨범아트를 덮어 그림
             Icon(
                 Icons.Filled.MusicNote, contentDescription = null,
                 tint = Vinyl.Bg.copy(alpha = 0.7f), modifier = Modifier.size(40.dp)
@@ -215,7 +207,6 @@ private fun VinylDisc(artworkUri: String?, isPlaying: Boolean, onClick: () -> Un
                 )
             }
         }
-        // 중심 구멍
         Box(Modifier.size(18.dp).clip(CircleShape).background(Vinyl.Bg))
     }
 }
@@ -224,10 +215,9 @@ private fun VinylDisc(artworkUri: String?, isPlaying: Boolean, onClick: () -> Un
 private fun SeekBar(vm: PlayerViewModel) {
     val progress by vm.progress.collectAsStateWithLifecycle()
     val dur = progress.durationMs.coerceAtLeast(1L)
-    var dragFrac by remember { mutableStateOf<Float?>(null) }      // 끄는 중일 때만 값
-    var pendingTarget by remember { mutableStateOf<Long?>(null) }  // 손 뗀 뒤 따라잡을 때까지 유지
+    var dragFrac by remember { mutableStateOf<Float?>(null) }
+    var pendingTarget by remember { mutableStateOf<Long?>(null) }
 
-    // 실제 재생위치가 목표에 근접하면 pending 해제 (튐 방지)
     LaunchedEffect(progress.positionMs, pendingTarget) {
         val tgt = pendingTarget
         if (tgt != null && kotlin.math.abs(progress.positionMs - tgt) < 700) pendingTarget = null
@@ -341,7 +331,7 @@ private fun Extras(state: PlayerUiState, vm: PlayerViewModel) {
     }
 }
 
-/* ---------------- 재생목록 ---------------- */
+/* ---------------- 재생목록 (드릴다운) ---------------- */
 
 @Composable
 private fun PlaylistPage(
@@ -377,7 +367,6 @@ private fun PlaylistPage(
             )
         }
 
-        // 하단 미니 플레이어 (브라우즈/상세 공통)
         state.currentTrack?.let { cur ->
             MiniPlayer(
                 track = cur,
@@ -401,7 +390,7 @@ private fun PlaylistPage(
     }
 }
 
-/* 브라우즈: 전체 + 내 목록 + 폴더 리스트 (탭하면 상세로) */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BrowseList(
     state: PlayerUiState,
@@ -564,7 +553,7 @@ private fun SectionHeader(title: String, actionLabel: String?, onAction: () -> U
     }
 }
 
-/* 상세: 선택한 컬렉션의 곡 목록 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailView(
     state: PlayerUiState,
@@ -589,9 +578,498 @@ private fun DetailView(
     val canReorder = isCustom && state.query.isBlank()
 
     Column(modifier) {
-        // 헤더: 뒤로 + 이름 + 현재곡 이동 + 추가
         Row(
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButt
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = Vinyl.Text)
+            }
+            Text(chip, color = Vinyl.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            IconButton(onClick = {
+                val idx = shown.indexOfFirst { it.id == state.currentTrackId }
+                if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+            }) { Icon(Icons.Filled.GpsFixed, "현재 곡으로", tint = Vinyl.Muted, modifier = Modifier.size(20.dp)) }
+            IconButton(onClick = {
+                if (isCustom) showSongPicker = true else if (shown.isNotEmpty()) showAddAll = true
+            }) { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, "곡 추가", tint = Vinyl.Muted) }
+        }
+
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = { viewModel.setQuery(it) },
+            placeholder = { Text("제목·아티스트 검색", color = Vinyl.Faint) },
+            leadingIcon = { Icon(Icons.Filled.Search, null, tint = Vinyl.Faint) },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Vinyl.Accent,
+                unfocusedBorderColor = Vinyl.Line,
+                focusedTextColor = Vinyl.Text,
+                unfocusedTextColor = Vinyl.Text,
+                cursorColor = Vinyl.Accent,
+                focusedContainerColor = Vinyl.Surface,
+                unfocusedContainerColor = Vinyl.Surface
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("${shown.size}곡", color = Vinyl.Faint, fontSize = 12.sp)
+            if (isCustom) {
+                Row(
+                    Modifier.clickable { viewModel.clearActivePlaylist() },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.DeleteOutline, null, tint = Vinyl.Faint, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("목록 비우기", color = Vinyl.Faint, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (shown.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        if (state.query.isNotBlank()) "검색 결과가 없어요."
+                        else if (isCustom) "이 목록이 비어있어요."
+                        else "표시할 음악이 없어요.",
+                        color = Vinyl.Faint, fontSize = 14.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    if (isCustom && state.query.isBlank()) {
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = { showSongPicker = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Vinyl.Accent, contentColor = Vinyl.Bg
+                            )
+                        ) { Text("+ 곡 추가") }
+                    }
+                }
+            } else {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
+                    items(shown, key = { it.id }) { track ->
+                        if (canReorder) {
+                            ReorderableItem(reorderState, key = track.id) { isDragging ->
+                                Surface(color = if (isDragging) Vinyl.SurfaceHi else Color.Transparent) {
+                                    TrackRow(
+                                        track = track,
+                                        isCurrent = track.id == state.currentTrackId,
+                                        isPlaying = state.isPlaying,
+                                        playlists = state.playlists,
+                                        inCustomPlaylist = isCustom,
+                                        onClick = { viewModel.playTrack(track); onOpenPlayer() },
+                                        onAddTo = { name -> viewModel.addToPlaylist(track.id, name) },
+                                        onCreateAndAdd = onCreate,
+                                        onRemove = { viewModel.removeFromPlaylist(track.id, chip) },
+                                        dragModifier = Modifier.longPressDraggableHandle()
+                                    )
+                                }
+                            }
+                        } else {
+                            TrackRow(
+                                track = track,
+                                isCurrent = track.id == state.currentTrackId,
+                                isPlaying = state.isPlaying,
+                                playlists = state.playlists,
+                                inCustomPlaylist = isCustom,
+                                onClick = { viewModel.playTrack(track); onOpenPlayer() },
+                                onAddTo = { name -> viewModel.addToPlaylist(track.id, name) },
+                                onCreateAndAdd = onCreate,
+                                onRemove = { viewModel.removeFromPlaylist(track.id, chip) }
+                            )
+                        }
+                    }
+                    item { Spacer(Modifier.height(20.dp)) }
+                }
+            }
+        }
+    }
+
+    if (showAddAll) {
+        PickPlaylistDialog(
+            playlists = state.playlists,
+            onPick = { viewModel.addAllShownToPlaylist(it); showAddAll = false },
+            onCreate = { name -> if (viewModel.createPlaylist(name)) viewModel.addAllShownToPlaylist(name); showAddAll = false },
+            onDismiss = { showAddAll = false }
+        )
+    }
+    if (showSongPicker) {
+        SongPickerDialog(
+            viewModel = viewModel,
+            folders = state.folders,
+            targetName = chip,
+            onConfirm = { ids -> viewModel.addManyToPlaylist(ids, chip); showSongPicker = false },
+            onDismiss = { showSongPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun MiniPlayer(
+    track: Track,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onOpen: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(Vinyl.SurfaceHi)
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(Vinyl.Surface),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.MusicNote, null, tint = Vinyl.Faint, modifier = Modifier.size(18.dp))
+            if (track.artworkUri != null) {
+                AsyncImage(track.artworkUri.toString(), null,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.title, color = Vinyl.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, color = Vinyl.Muted, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        IconButton(onClick = onPlayPause) {
+            Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (isPlaying) "일시정지" else "재생", tint = Vinyl.Accent, modifier = Modifier.size(28.dp))
+        }
+        IconButton(onClick = onNext) {
+            Icon(Icons.Filled.SkipNext, "다음", tint = Vinyl.Text, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun LicenseDialog(onDismiss: () -> Unit) {
+    val libs = listOf(
+        "Jetpack Compose / AndroidX" to "Apache License 2.0",
+        "AndroidX Media3 (ExoPlayer)" to "Apache License 2.0",
+        "Coil" to "Apache License 2.0",
+        "Google Guava" to "Apache License 2.0",
+        "Material Icons" to "Apache License 2.0",
+        "Kotlin / Coroutines" to "Apache License 2.0",
+        "Reorderable (sh.calvin)" to "Apache License 2.0"
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Vinyl.Surface,
+        title = { Text("오픈소스 라이선스", color = Vinyl.Text, fontSize = 16.sp) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    "이 앱은 아래 오픈소스 라이브러리를 사용합니다.",
+                    color = Vinyl.Muted, fontSize = 11.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                libs.forEach { (name, lic) ->
+                    Text(name, color = Vinyl.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(lic, color = Vinyl.Faint, fontSize = 10.sp)
+                    Spacer(Modifier.height(6.dp))
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Licensed under the Apache License, Version 2.0. " +
+                        "You may obtain a copy of the License at " +
+                        "http://www.apache.org/licenses/LICENSE-2.0. " +
+                        "Unless required by applicable law or agreed to in writing, software " +
+                        "distributed under the License is distributed on an \"AS IS\" BASIS, " +
+                        "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.",
+                    color = Vinyl.Faint, fontSize = 9.sp, lineHeight = 13.sp
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("닫기", color = Vinyl.Accent) } }
+    )
+}
+
+@Composable
+private fun TrackRow(
+    track: Track,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    playlists: List<String>,
+    inCustomPlaylist: Boolean,
+    onClick: () -> Unit,
+    onAddTo: (String) -> Unit,
+    onCreateAndAdd: () -> Unit,
+    onRemove: () -> Unit,
+    dragModifier: Modifier = Modifier
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+            .background(if (isCurrent) Vinyl.SurfaceHi else Color.Transparent)
+            .then(dragModifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)).background(Vinyl.SurfaceHi),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.MusicNote, null, tint = Vinyl.Faint, modifier = Modifier.size(20.dp))
+            if (track.artworkUri != null) {
+                AsyncImage(track.artworkUri.toString(), null,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+        }
+        Spacer(Modifier.width(13.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.title, color = if (isCurrent) Vinyl.Accent else Vinyl.Text,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, color = Vinyl.Muted, fontSize = 12.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (isCurrent && isPlaying) {
+            Icon(Icons.Filled.GraphicEq, null, tint = Vinyl.Accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+        }
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, "목록에 추가", tint = Vinyl.Faint, modifier = Modifier.size(20.dp))
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                playlists.forEach { pl ->
+                    DropdownMenuItem(text = { Text(pl) }, onClick = { onAddTo(pl); menuOpen = false })
+                }
+                DropdownMenuItem(text = { Text("+ 새 목록…") }, onClick = { onCreateAndAdd(); menuOpen = false })
+            }
+        }
+        if (inCustomPlaylist) {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Filled.Close, "목록에서 제거", tint = Vinyl.Faint, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/* ---------------- 다이얼로그 ---------------- */
+
+@Composable
+private fun SongPickerDialog(
+    viewModel: PlayerViewModel,
+    folders: List<String>,
+    targetName: String,
+    onConfirm: (List<Long>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var folder by remember { mutableStateOf<String?>(null) }
+    val selected = remember { mutableStateListOf<Long>() }
+    val library = viewModel.libraryFor(query, folder)
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = Vinyl.Bg,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.9f)
+        ) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Text("\"$targetName\"에 곡 추가", color = Vinyl.Text,
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    placeholder = { Text("제목·아티스트 검색", color = Vinyl.Faint) },
+                    leadingIcon = { Icon(Icons.Filled.Search, null, tint = Vinyl.Faint) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Vinyl.Accent, unfocusedBorderColor = Vinyl.Line,
+                        focusedTextColor = Vinyl.Text, unfocusedTextColor = Vinyl.Text,
+                        cursorColor = Vinyl.Accent,
+                        focusedContainerColor = Vinyl.Surface, unfocusedContainerColor = Vinyl.Surface
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                LazyRow(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    item { PickChip("전체", folder == null) { folder = null } }
+                    items(folders, key = { it }) { f ->
+                        PickChip(f, folder == f) { folder = f }
+                    }
+                }
+                Button(
+                    onClick = { onConfirm(library.map { it.id }) },
+                    enabled = library.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Vinyl.Accent, contentColor = Vinyl.Bg,
+                        disabledContainerColor = Vinyl.Surface, disabledContentColor = Vinyl.Faint
+                    )
+                ) {
+                    Icon(Icons.Filled.LibraryAdd, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (folder == null) "전체 ${library.size}곡 모두 추가"
+                        else "'$folder' 폴더 ${library.size}곡 모두 추가",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("또는 개별 선택 · ${selected.size}곡", color = Vinyl.Muted, fontSize = 12.sp)
+                    TextButton(onClick = {
+                        val ids = library.map { it.id }
+                        if (ids.all { selected.contains(it) }) selected.removeAll(ids)
+                        else ids.forEach { if (!selected.contains(it)) selected.add(it) }
+                    }) { Text("보이는 곡 전체선택", color = Vinyl.Accent, fontSize = 12.sp) }
+                }
+                LazyColumn(Modifier.weight(1f)) {
+                    items(library, key = { it.id }) { t ->
+                        val checked = selected.contains(t.id)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { if (checked) selected.remove(t.id) else selected.add(t.id) }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { if (checked) selected.remove(t.id) else selected.add(t.id) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Vinyl.Accent, uncheckedColor = Vinyl.Faint,
+                                    checkmarkColor = Vinyl.Bg
+                                )
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(t.title, color = Vinyl.Text, fontSize = 14.sp,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(t.artist, color = Vinyl.Muted, fontSize = 12.sp,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("취소", color = Vinyl.Muted) }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = { onConfirm(selected.toList()) },
+                        enabled = selected.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Vinyl.Accent, contentColor = Vinyl.Bg,
+                            disabledContainerColor = Vinyl.Surface, disabledContentColor = Vinyl.Faint
+                        )
+                    ) { Text("추가 (${selected.size})") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape)
+            .then(if (on) Modifier.background(Brush.linearGradient(listOf(Vinyl.Accent, Vinyl.Accent2)))
+            else Modifier.background(Vinyl.Surface).border(1.dp, Vinyl.Line, CircleShape))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 7.dp)
+    ) {
+        Text(label, color = if (on) Vinyl.Bg else Vinyl.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun NameDialog(
+    title: String,
+    initial: String = "",
+    confirmLabel: String = "만들기",
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Vinyl.Surface,
+        title = { Text(title, color = Vinyl.Text) },
+        text = {
+            OutlinedTextField(
+                value = text, onValueChange = { text = it }, singleLine = true,
+                placeholder = { Text("목록 이름", color = Vinyl.Faint) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Vinyl.Accent, unfocusedBorderColor = Vinyl.Line,
+                    focusedTextColor = Vinyl.Text, unfocusedTextColor = Vinyl.Text,
+                    cursorColor = Vinyl.Accent
+                )
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text(confirmLabel, color = Vinyl.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = Vinyl.Muted) } }
+    )
+}
+
+@Composable
+private fun PickPlaylistDialog(
+    playlists: List<String>,
+    onPick: (String) -> Unit,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var creating by remember { mutableStateOf(false) }
+    if (creating) {
+        NameDialog("새 목록에 전체 추가", onConfirm = onCreate, onDismiss = onDismiss)
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Vinyl.Surface,
+        title = { Text("어느 목록에 추가할까요?", color = Vinyl.Text) },
+        text = {
+            Column {
+                if (playlists.isEmpty()) Text("아직 목록이 없어요. 새로 만들 수 있어요.", color = Vinyl.Muted)
+                playlists.forEach { pl ->
+                    Text(pl, color = Vinyl.Text,
+                        modifier = Modifier.fillMaxWidth().clickable { onPick(pl) }.padding(vertical = 10.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { creating = true }) { Text("+ 새 목록", color = Vinyl.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = Vinyl.Muted) } }
+    )
+}
+
+/* ---------------- 유틸 ---------------- */
+
+private fun fmt(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    return "%d:%02d".format(total / 60, total % 60)
+}
+
+private fun speedLabel(s: Float): String =
+    if (s == s.toLong().toFloat()) "${s.toLong()}x" else "${s}x"

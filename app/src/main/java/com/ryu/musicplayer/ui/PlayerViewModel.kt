@@ -24,14 +24,13 @@ val SPEEDS = listOf(1f, 1.25f, 1.5f, 2f, 0.5f)
 
 data class PlayerUiState(
     val allTracks: List<Track> = emptyList(),
-    val folders: List<String> = emptyList(),               // 자동 폴더 그룹
-    val playlists: List<String> = emptyList(),             // 사용자 재생목록 이름
+    val folders: List<String> = emptyList(),
+    val playlists: List<String> = emptyList(),
     val playlistMembers: Map<String, Set<Long>> = emptyMap(),
-    val playlistRevision: Int = 0,                          // 목록 변경 감지용(Set 순서 무시 문제 방지)
+    val playlistRevision: Int = 0,
     val activeChip: String = ALL_CHIP,
     val query: String = "",
     val isLoading: Boolean = false,
-    // 재생 상태
     val currentTrackId: Long? = null,
     val isPlaying: Boolean = false,
     val shuffle: Boolean = false,
@@ -166,11 +165,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun setQuery(q: String) = _uiState.update { it.copy(query = q) }
 
     // ---------- 재생 ----------
-    /**
-     * 곡을 재생한다. 재생 큐(다음/이전/자동재생 범위)는 검색 결과가 아니라
-     * 그 곡이 속한 "현재 칩(전체/폴더/재생목록) 전체"로 만든다.
-     * 그래서 검색해서 한 곡을 틀어도, 끝나면 그 목록의 다음 곡으로 이어진다.
-     */
     fun playTrack(track: Track) {
         val c = controller ?: return
         val scope = tracksForChip(_uiState.value.activeChip)
@@ -181,7 +175,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         c.play()
     }
 
-    /** 현재 칩 전체를 처음부터 재생 */
     fun playChipFromStart() {
         val c = controller ?: return
         val scope = tracksForChip(_uiState.value.activeChip)
@@ -264,4 +257,112 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         commitPlaylists()
     }
 
-    /** 여러 곡을 한 �
+    /** 여러 곡을 한 번에 목록에 추가 (곡 고르기 창에서 사용) */
+    fun addManyToPlaylist(ids: Collection<Long>, name: String) {
+        if (ids.isEmpty()) return
+        playlistMap.getOrPut(name) { LinkedHashSet() }.addAll(ids)
+        commitPlaylists()
+    }
+
+    /** 곡 고르기 창용: 전체 라이브러리를 검색어/폴더로 필터 */
+    fun libraryFor(query: String, folder: String?): List<Track> {
+        val q = query.trim().lowercase()
+        return _uiState.value.allTracks.filter { t ->
+            (folder == null || t.folder == folder) &&
+                (q.isEmpty() || (t.title + " " + t.artist).lowercase().contains(q))
+        }
+    }
+
+    fun addAllShownToPlaylist(name: String) {
+        val set = playlistMap.getOrPut(name) { LinkedHashSet() }
+        shownTracks().forEach { set.add(it.id) }
+        commitPlaylists()
+    }
+
+    fun removeFromPlaylist(trackId: Long, name: String) {
+        playlistMap[name]?.remove(trackId)
+        commitPlaylists()
+    }
+
+    /** 현재 보고 있는 사용자 재생목록 비우기 */
+    fun clearActivePlaylist() {
+        val name = _uiState.value.activeChip
+        if (playlistMap.containsKey(name)) {
+            playlistMap[name]?.clear()
+            commitPlaylists()
+        }
+    }
+
+    /** 내 목록 순서 이동 (드래그) — 키는 "pl_<이름>" */
+    fun movePlaylistByKey(fromKey: String, toKey: String) {
+        val from = fromKey.removePrefix("pl_")
+        val to = toKey.removePrefix("pl_")
+        if (from == to) return
+        val names = playlistMap.keys.toMutableList()
+        val fi = names.indexOf(from)
+        val ti = names.indexOf(to)
+        if (fi < 0 || ti < 0) return
+        names.add(ti, names.removeAt(fi))
+        val rebuilt = LinkedHashMap<String, MutableSet<Long>>()
+        names.forEach { rebuilt[it] = playlistMap[it] ?: LinkedHashSet() }
+        playlistMap.clear()
+        playlistMap.putAll(rebuilt)
+        commitPlaylists()
+    }
+
+    /** 목록 안 곡 순서 이동 (드래그) */
+    fun moveTrackInPlaylist(playlist: String, fromId: Long, toId: Long) {
+        if (fromId == toId) return
+        val set = playlistMap[playlist] ?: return
+        val ids = set.toMutableList()
+        val fi = ids.indexOf(fromId)
+        val ti = ids.indexOf(toId)
+        if (fi < 0 || ti < 0) return
+        ids.add(ti, ids.removeAt(fi))
+        set.clear()
+        set.addAll(ids)
+        commitPlaylists()
+    }
+
+    /** 사용자 목록 이름 변경 (순서·내용 유지) */
+    fun renamePlaylist(old: String, newRaw: String): Boolean {
+        val name = newRaw.trim()
+        if (name.isEmpty() || name == ALL_CHIP || name in _uiState.value.folders) return false
+        if (!playlistMap.containsKey(old)) return false
+        if (name == old) return true
+        if (playlistMap.containsKey(name)) return false
+        val rebuilt = LinkedHashMap<String, MutableSet<Long>>()
+        playlistMap.forEach { (k, v) -> rebuilt[if (k == old) name else k] = v }
+        playlistMap.clear()
+        playlistMap.putAll(rebuilt)
+        commitPlaylists()
+        if (_uiState.value.activeChip == old) _uiState.update { it.copy(activeChip = name) }
+        return true
+    }
+
+    fun deletePlaylist(name: String) {
+        if (playlistMap.remove(name) != null) {
+            commitPlaylists()
+            if (_uiState.value.activeChip == name) _uiState.update { it.copy(activeChip = ALL_CHIP) }
+        }
+    }
+
+    override fun onCleared() {
+        controller?.removeListener(playerListener)
+        super.onCleared()
+    }
+
+    private fun Track.toMediaItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id.toString())
+            .setUri(uri)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setAlbumTitle(album)
+                    .setArtworkUri(artworkUri)
+                    .build()
+            )
+            .build()
+}

@@ -85,4 +85,8 @@ dependencies {
     // Coil - 앨범 아트 로딩 (content:// 앨범아트 URI 지원)
     implementation("io.coil-kt:coil-compose:2.6.0")
 
+    // 드래그앤드롭 순서 변경 (LazyColumn reorder)
+    implementation("sh.calvin.reorderable:reorderable:2.4.0")
+}
+
  
