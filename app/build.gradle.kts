@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.papaya5rhw1984.ryumusic"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
     }
 
     signingConfigs {
