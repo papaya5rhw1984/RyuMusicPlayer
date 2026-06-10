@@ -1,6 +1,7 @@
 package com.ryu.musicplayer.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -48,6 +49,8 @@ data class Progress(val positionMs: Long = 0L, val durationMs: Long = 0L)
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = PlaylistStore(app)
+    private val statePrefs = app.getSharedPreferences("player_state", Context.MODE_PRIVATE)
+    private var restored = false
     private val playlistMap: LinkedHashMap<String, MutableSet<Long>> = store.load()
 
     private val _uiState = MutableStateFlow(
@@ -66,8 +69,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             field = value
             value?.addListener(playerListener)
             if (value != null) {
+                value.shuffleModeEnabled = statePrefs.getBoolean("shuffle", false)
+                value.repeatMode = statePrefs.getInt("repeat", Player.REPEAT_MODE_OFF)
                 syncFromPlayer()
                 startPositionLoop()
+                maybeRestoreLast()
             }
         }
 
@@ -76,14 +82,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.update { it.copy(isPlaying = isPlaying) }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            _uiState.update { it.copy(currentTrackId = mediaItem?.mediaId?.toLongOrNull()) }
+            val id = mediaItem?.mediaId?.toLongOrNull()
+            _uiState.update { it.copy(currentTrackId = id) }
+            if (id != null) statePrefs.edit().putLong("lastTrack", id).apply()
             _progress.value = Progress(0L, controller?.duration?.coerceAtLeast(0L) ?: 0L)
         }
         override fun onShuffleModeEnabledChanged(enabled: Boolean) {
             _uiState.update { it.copy(shuffle = enabled) }
+            statePrefs.edit().putBoolean("shuffle", enabled).apply()
         }
         override fun onRepeatModeChanged(repeatMode: Int) {
             _uiState.update { it.copy(repeatMode = repeatMode) }
+            statePrefs.edit().putInt("repeat", repeatMode).apply()
         }
         override fun onVolumeChanged(volume: Float) {
             _uiState.update { it.copy(volume = volume) }
@@ -134,6 +144,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.update {
                 it.copy(allTracks = tracks, folders = folders, isLoading = false)
             }
+            maybeRestoreLast()
         }
     }
 
@@ -173,6 +184,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         c.setMediaItems(scope.map { it.toMediaItem() }, idx, 0L)
         c.prepare()
         c.play()
+        statePrefs.edit().putString("lastChip", _uiState.value.activeChip).putLong("lastTrack", track.id).apply()
     }
 
     fun playChipFromStart() {
@@ -345,6 +357,27 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             commitPlaylists()
             if (_uiState.value.activeChip == name) _uiState.update { it.copy(activeChip = ALL_CHIP) }
         }
+    }
+
+    /** 앱 재시작 시 마지막에 선택했던 곡을 일시정지 상태로 복원(자동재생 안 함) */
+    private fun maybeRestoreLast() {
+        val c = controller ?: return
+        if (restored) return
+        if (c.mediaItemCount > 0) { restored = true; return }   // 이미 재생 중이면 건드리지 않음
+        val tracks = _uiState.value.allTracks
+        if (tracks.isEmpty()) return                            // 트랙 로드 후 다시 시도됨
+        val lastId = statePrefs.getLong("lastTrack", -1L)
+        if (lastId < 0L) { restored = true; return }
+        val savedChip = statePrefs.getString("lastChip", ALL_CHIP) ?: ALL_CHIP
+        val chip = if (savedChip == ALL_CHIP || playlistMap.containsKey(savedChip) || savedChip in _uiState.value.folders) savedChip else ALL_CHIP
+        val scope = tracksForChip(chip)
+        val idx = scope.indexOfFirst { it.id == lastId }
+        if (idx < 0) { restored = true; return }
+        restored = true
+        _uiState.update { it.copy(activeChip = chip, currentTrackId = lastId) }
+        c.playWhenReady = false
+        c.setMediaItems(scope.map { it.toMediaItem() }, idx, 0L)
+        c.prepare()
     }
 
     override fun onCleared() {
