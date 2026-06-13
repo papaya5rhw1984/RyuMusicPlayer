@@ -150,7 +150,22 @@ private fun NowPlayingPage(state: PlayerUiState, vm: PlayerViewModel) {
         SeekBar(vm)
         Spacer(Modifier.height(22.dp))
         Controls(state, vm)
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(10.dp))
+        // v1.2.0: ±10초 탐색
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Vinyl.Line, RoundedCornerShape(9.dp))
+                    .background(Vinyl.Surface).clickable { vm.seekBy(-10_000L) }
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) { Text("↺ 10초", color = Vinyl.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+            Spacer(Modifier.width(14.dp))
+            Box(
+                Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Vinyl.Line, RoundedCornerShape(9.dp))
+                    .background(Vinyl.Surface).clickable { vm.seekBy(10_000L) }
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) { Text("10초 ↻", color = Vinyl.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+        }
+        Spacer(Modifier.height(10.dp))
         Extras(state, vm)
     }
 }
@@ -327,6 +342,23 @@ private fun Extras(state: PlayerUiState, vm: PlayerViewModel) {
                 .padding(horizontal = 12.dp, vertical = 7.dp)
         ) {
             Text(speedLabel(state.speed), color = Vinyl.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.width(8.dp))
+        // v1.0.3: 수면 타이머 — 탭마다 끄기→15→30→60분 순환, 시간이 되면 일시정지
+        Box(
+            Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Vinyl.Line, RoundedCornerShape(9.dp))
+                .background(Vinyl.Surface).clickable { vm.cycleSleepTimer() }
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+        ) {
+            Text(
+                when {
+                    state.sleepEndOfTrack -> "🌙 곡 끝"   // v1.2.0
+                    state.sleepRemainMin != null -> "🌙 ${state.sleepRemainMin}분"
+                    else -> "🌙 타이머"
+                },
+                color = if (state.sleepRemainMin != null || state.sleepEndOfTrack) Vinyl.Accent else Vinyl.Muted,
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }

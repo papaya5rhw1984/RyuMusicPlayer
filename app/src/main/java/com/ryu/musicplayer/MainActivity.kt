@@ -177,6 +177,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        // v1.1.0: 컨트롤러 해제 '직전'에 현재 곡·위치 스냅샷 저장 — 이후 백그라운드/강제종료 시에도 복원 기준이 남는다
+        viewModel.saveNowState()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         viewModel.controller = null
         super.onStop()

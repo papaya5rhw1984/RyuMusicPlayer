@@ -37,7 +37,9 @@ data class PlayerUiState(
     val shuffle: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val speedIndex: Int = 0,
-    val volume: Float = 1f
+    val volume: Float = 1f,
+    val sleepRemainMin: Int? = null,   // v1.0.3: 수면 타이머 남은 분(null=꺼짐)
+    val sleepEndOfTrack: Boolean = false   // v1.2.0: '이 곡 끝까지' 모드
 ) {
     val currentTrack: Track? get() = allTracks.firstOrNull { it.id == currentTrackId }
     val speed: Float get() = SPEEDS[speedIndex]
@@ -71,6 +73,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             if (value != null) {
                 value.shuffleModeEnabled = statePrefs.getBoolean("shuffle", false)
                 value.repeatMode = statePrefs.getInt("repeat", Player.REPEAT_MODE_OFF)
+                // v1.0.3: 재생속도 복원 (기존엔 재시작 시 1x로 초기화)
+                val si = statePrefs.getInt("speedIdx", 0).coerceIn(0, SPEEDS.size - 1)
+                _uiState.update { it.copy(speedIndex = si) }
+                value.setPlaybackSpeed(SPEEDS[si])
                 syncFromPlayer()
                 startPositionLoop()
                 maybeRestoreLast()
@@ -84,7 +90,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val id = mediaItem?.mediaId?.toLongOrNull()
             _uiState.update { it.copy(currentTrackId = id) }
-            if (id != null) statePrefs.edit().putLong("lastTrack", id).apply()
+            // v1.2.0: '이 곡 끝까지' 모드 — 곡이 자연 종료되어 다음 곡으로 넘어가는 순간 일시정지
+            if (_uiState.value.sleepEndOfTrack && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                controller?.pause()
+                _uiState.update { it.copy(sleepEndOfTrack = false) }
+            }
+            // v1.1.0: 곡이 '실제로 바뀐' 경우에만 위치 리셋 — 복원 직후 전환 이벤트가 lastPos를 지우던 결함 방지
+            if (id != null) {
+                val prev = statePrefs.getLong("lastTrack", -1L)
+                val e = statePrefs.edit().putLong("lastTrack", id)
+                if (prev != id) e.putLong("lastPos", 0L)
+                e.apply()
+            }
             _progress.value = Progress(0L, controller?.duration?.coerceAtLeast(0L) ?: 0L)
         }
         override fun onShuffleModeEnabledChanged(enabled: Boolean) {
@@ -115,6 +132,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var loopStarted = false
+    private var posSaveTick = 0
     private fun startPositionLoop() {
         if (loopStarted) return
         loopStarted = true
@@ -126,10 +144,59 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                         c.currentPosition.coerceAtLeast(0L),
                         c.duration.coerceAtLeast(0L)
                     )
+                    // v1.0.3: 재생 중 4초마다 위치 저장 → 다음 실행 때 이어듣기
+                    if (c.isPlaying) {
+                        posSaveTick++
+                        if (posSaveTick % 10 == 0) statePrefs.edit().putLong("lastPos", c.currentPosition.coerceAtLeast(0L)).apply()
+                    }
+                    // v1.0.3: 수면 타이머 — 시간이 다 되면 일시정지
+                    val end = sleepEndAt
+                    if (end != null) {
+                        if (System.currentTimeMillis() >= end) {
+                            sleepEndAt = null
+                            c.pause()
+                        }
+                        updateSleepRemain()
+                    }
                 }
                 delay(400)
             }
         }
+    }
+
+    // ---------- 수면 타이머 (끄기 → 15분 → 30분 → 60분 → 곡 끝 → 끄기) ----------
+    private var sleepEndAt: Long? = null
+    fun cycleSleepTimer() {
+        val now = System.currentTimeMillis()
+        // v1.2.0: '곡 끝' 모드에서 한 번 더 누르면 끄기
+        if (_uiState.value.sleepEndOfTrack) {
+            _uiState.update { it.copy(sleepEndOfTrack = false) }
+            sleepEndAt = null; updateSleepRemain(); return
+        }
+        val end = sleepEndAt
+        sleepEndAt = if (end == null) now + 15 * 60_000L else {
+            val remainMin = (end - now) / 60_000L
+            when {
+                remainMin >= 31 -> { _uiState.update { it.copy(sleepEndOfTrack = true) }; null }  // 60분대 → 곡 끝
+                remainMin >= 16 -> now + 60 * 60_000L    // 30분대 → 60분
+                else -> now + 30 * 60_000L               // 15분대 → 30분
+            }
+        }
+        updateSleepRemain()
+    }
+
+    /** v1.2.0: ±10초 탐색 */
+    fun seekBy(deltaMs: Long) {
+        val c = controller ?: return
+        val dur = c.duration
+        val target = (c.currentPosition + deltaMs).coerceAtLeast(0L)
+        c.seekTo(if (dur > 0) target.coerceAtMost(dur) else target)
+    }
+    private fun updateSleepRemain() {
+        val end = sleepEndAt
+        val remain = if (end == null) null
+        else (((end - System.currentTimeMillis()) + 59_999L) / 60_000L).toInt().coerceAtLeast(0)
+        _uiState.update { it.copy(sleepRemainMin = remain) }   // 동일 값이면 StateFlow가 재방출 안 함
     }
 
     /** 기기에서 음악 목록을 스캔 (권한 획득 후 호출) */
@@ -229,9 +296,23 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val next = (_uiState.value.speedIndex + 1) % SPEEDS.size
         _uiState.update { it.copy(speedIndex = next) }
         controller?.setPlaybackSpeed(SPEEDS[next])
+        statePrefs.edit().putInt("speedIdx", next).apply()   // v1.0.3: 배속 저장
     }
 
     fun setVolume(v: Float) { controller?.volume = v.coerceIn(0f, 1f) }
+
+    /** v1.1.0: 화면을 떠나는 순간(onStop) 현재 곡·위치를 스냅샷 저장.
+     *  기존엔 onStop에서 컨트롤러를 해제해 백그라운드 동안 '마지막 곡' 기록이 멈췄고,
+     *  그 상태에서 프로세스가 죽으면 복원이 어긋났다. */
+    fun saveNowState() {
+        val c = controller ?: return
+        val id = c.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        statePrefs.edit()
+            .putLong("lastTrack", id)
+            .putLong("lastPos", c.currentPosition.coerceAtLeast(0L))
+            .putString("lastChip", _uiState.value.activeChip)
+            .apply()
+    }
 
     // ---------- 재생목록 관리 ----------
     private fun snapshotMembers(): Map<String, Set<Long>> =
@@ -369,14 +450,21 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val lastId = statePrefs.getLong("lastTrack", -1L)
         if (lastId < 0L) { restored = true; return }
         val savedChip = statePrefs.getString("lastChip", ALL_CHIP) ?: ALL_CHIP
-        val chip = if (savedChip == ALL_CHIP || playlistMap.containsKey(savedChip) || savedChip in _uiState.value.folders) savedChip else ALL_CHIP
-        val scope = tracksForChip(chip)
-        val idx = scope.indexOfFirst { it.id == lastId }
+        var chip = if (savedChip == ALL_CHIP || playlistMap.containsKey(savedChip) || savedChip in _uiState.value.folders) savedChip else ALL_CHIP
+        var scope = tracksForChip(chip)
+        var idx = scope.indexOfFirst { it.id == lastId }
+        // v1.1.0: 듣던 목록에서 곡이 빠졌거나 목록이 삭제된 경우 '전체'에서 다시 찾아 복원 (기존엔 그냥 포기 → 음악 유지 실패의 주원인 중 하나)
+        if (idx < 0 && chip != ALL_CHIP) {
+            chip = ALL_CHIP; scope = tracksForChip(ALL_CHIP)
+            idx = scope.indexOfFirst { it.id == lastId }
+        }
         if (idx < 0) { restored = true; return }
         restored = true
         _uiState.update { it.copy(activeChip = chip, currentTrackId = lastId) }
         c.playWhenReady = false
-        c.setMediaItems(scope.map { it.toMediaItem() }, idx, 0L)
+        // v1.0.3: 마지막 재생 위치까지 복원(이어듣기) — lastPos는 항상 lastTrack의 위치
+        val lastPos = statePrefs.getLong("lastPos", 0L).coerceAtLeast(0L)
+        c.setMediaItems(scope.map { it.toMediaItem() }, idx, lastPos)
         c.prepare()
     }
 
