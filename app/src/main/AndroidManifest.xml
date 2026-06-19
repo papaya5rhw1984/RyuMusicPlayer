@@ -32,6 +32,11 @@
             </intent-filter>
         </activity>
 
+        <!-- v1.3.0: 수면 타이머 알람 수신기 (폴드/화면꺼짐에서도 재생 정지) -->
+        <receiver
+            android:name=".playback.SleepReceiver"
+            android:exported="false" />
+
         <!-- Media3 MediaSessionService: 백그라운드 재생 + 알림/잠금화면 컨트롤 -->
         <service
             android:name=".playback.PlaybackService"

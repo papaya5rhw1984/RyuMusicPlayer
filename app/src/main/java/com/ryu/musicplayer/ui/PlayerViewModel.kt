@@ -1,7 +1,10 @@
 package com.ryu.musicplayer.ui
 
+import android.app.AlarmManager
 import android.app.Application
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -11,6 +14,7 @@ import androidx.media3.session.MediaController
 import com.ryu.musicplayer.data.MusicRepository
 import com.ryu.musicplayer.data.PlaylistStore
 import com.ryu.musicplayer.data.Track
+import com.ryu.musicplayer.playback.SleepReceiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +81,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 val si = statePrefs.getInt("speedIdx", 0).coerceIn(0, SPEEDS.size - 1)
                 _uiState.update { it.copy(speedIndex = si) }
                 value.setPlaybackSpeed(SPEEDS[si])
+                _uiState.update { it.copy(sleepEndOfTrack = statePrefs.getBoolean("endOfTrack", false)) }
                 syncFromPlayer()
                 startPositionLoop()
                 maybeRestoreLast()
@@ -93,6 +98,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             // v1.2.0: '이 곡 끝까지' 모드 — 곡이 자연 종료되어 다음 곡으로 넘어가는 순간 일시정지
             if (_uiState.value.sleepEndOfTrack && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 controller?.pause()
+                statePrefs.edit().putBoolean("endOfTrack", false).apply()
                 _uiState.update { it.copy(sleepEndOfTrack = false) }
             }
             // v1.1.0: 곡이 '실제로 바뀐' 경우에만 위치 리셋 — 복원 직후 전환 이벤트가 lastPos를 지우던 결함 방지
@@ -154,6 +160,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     if (end != null) {
                         if (System.currentTimeMillis() >= end) {
                             sleepEndAt = null
+                            scheduleSleep(null)
                             c.pause()
                         }
                         updateSleepRemain()
@@ -166,22 +173,40 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- 수면 타이머 (끄기 → 15분 → 30분 → 60분 → 곡 끝 → 끄기) ----------
     private var sleepEndAt: Long? = null
+
+    /** v1.3.0: 수면 타이머를 AlarmManager로도 예약 → 앱이 폴드/백그라운드(컨트롤러 해제)여도 OS가 발동.
+     *  setAndAllowWhileIdle은 권한 불필요하며, 음악 재생 중에는 기기가 깊은 도즈에 안 들어가 제때 발동된다. */
+    private fun scheduleSleep(end: Long?) {
+        val ctx = getApplication<Application>()
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val pi = PendingIntent.getBroadcast(
+            ctx, 7001,
+            Intent(ctx, SleepReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        am.cancel(pi)
+        if (end != null) {
+            try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, end, pi) } catch (_: Throwable) {}
+        }
+    }
+
     fun cycleSleepTimer() {
         val now = System.currentTimeMillis()
         // v1.2.0: '곡 끝' 모드에서 한 번 더 누르면 끄기
         if (_uiState.value.sleepEndOfTrack) {
             _uiState.update { it.copy(sleepEndOfTrack = false) }
-            sleepEndAt = null; updateSleepRemain(); return
+            sleepEndAt = null; scheduleSleep(null); statePrefs.edit().putBoolean("endOfTrack", false).apply(); updateSleepRemain(); return
         }
         val end = sleepEndAt
         sleepEndAt = if (end == null) now + 15 * 60_000L else {
             val remainMin = (end - now) / 60_000L
             when {
-                remainMin >= 31 -> { _uiState.update { it.copy(sleepEndOfTrack = true) }; null }  // 60분대 → 곡 끝
+                remainMin >= 31 -> { _uiState.update { it.copy(sleepEndOfTrack = true) }; statePrefs.edit().putBoolean("endOfTrack", true).apply(); null }  // 60분대 → 곡 끝
                 remainMin >= 16 -> now + 60 * 60_000L    // 30분대 → 60분
                 else -> now + 30 * 60_000L               // 15분대 → 30분
             }
         }
+        scheduleSleep(sleepEndAt)
         updateSleepRemain()
     }
 
